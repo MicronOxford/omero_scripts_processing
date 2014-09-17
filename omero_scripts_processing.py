@@ -612,7 +612,6 @@ class chain(object):
         ##      and success but we need to compile a list of
         ##      problems and give it back to the user at the end
         nbads += 1
-        raise
 
     if nimgs == 0:
       msg = "No images selected"
