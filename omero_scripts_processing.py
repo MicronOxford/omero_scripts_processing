@@ -405,6 +405,17 @@ class matlab_block(pipe_block):
     """Convert Python boolean values into Matlab."""
     return 'true()' if b else 'false()'
 
+  def get_parent(self, parent):
+    """Get parent image into an image file.
+
+    Creates an ome.tiff and sets self.fin to it.
+    """
+    super(matlab_block, self).get_parent(parent)
+    self.fin = self.get_tmp_file(suffix = ".ome.tiff")
+    fin = tempfile.NamedTemporaryFile(suffix = ".ome.tiff")
+    fin.write(im.exportOmeTiff())
+    fin.flush()
+
   def protect_exit(self):
     """Enclose the Matlab code in an try/catch block.
 
