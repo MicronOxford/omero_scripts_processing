@@ -418,9 +418,8 @@ class matlab_block(pipe_block):
     """
     super(matlab_block, self).get_parent(parent)
     self.fin = self.get_tmp_file(suffix = ".ome.tiff")
-    fin = tempfile.NamedTemporaryFile(suffix = ".ome.tiff")
-    fin.write(im.exportOmeTiff())
-    fin.flush()
+    self.fin.write(im.exportOmeTiff())
+    self.fin.flush()
 
   @staticmethod
   def protect_exit(self, code):
