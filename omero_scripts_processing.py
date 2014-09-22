@@ -400,6 +400,12 @@ class matlab_block(pipe_block):
   Because Matlab is really not meant to do this sort of things.
   """
 
+  interpreter = distutils.spawn.find_executable("matlab")
+  """The path for Matlab's intepreter."""
+
+  interpreter_options = ["-nodisplay", "-nosplash", "-nojvm"]
+  """List of options to use when starting Matlab."""
+
   @staticmethod
   def bool_py2m(b):
     """Convert Python boolean values into Matlab."""
@@ -416,7 +422,8 @@ class matlab_block(pipe_block):
     fin.write(im.exportOmeTiff())
     fin.flush()
 
-  def protect_exit(self):
+  @staticmethod
+  def protect_exit(self, code):
     """Enclose the Matlab code in an try/catch block.
 
     This modifies `code` property so that it is enclosed in a
@@ -431,37 +438,26 @@ class matlab_block(pipe_block):
     is also recommended.
     """
 
-    self.code = """\
-omero_ext_processing_status = 0;
-try
+    protected = (
+      "omero_scripts_processing_status = 0;\n"
+      "try\n"
+      "\n"
+      "%s\n"
+      "\n"
+      "catch omero_scripts_processing_err\n"
+      "  disp (['error: ' omero_scripts_processing_err.message()]);\n"
+      "  disp (omero_scripts_processing_err.stack ());\n"
+      "  omero_scripts_processing_status = 1;\n"
+      "end\n"
+      "exit (omero_scripts_processing_status);\n"
+    ) % (code)
+    return protected
 
-%s
-
-catch omero_ext_processing_err
-  disp (['error: ' omero_ext_processing_err.message()]);
-  disp (omero_ext_processing_err.stack ());
-  omero_ext_processing_status = 1;
-end
-exit (omero_ext_processing_status);
-""" % (self.code)
-
-  def process(self):
-    pass
-
-  def run_matlab(self, interpreter, options = ["-nodisplay", "-nosplash", "-nojvm"]):
-    """Constructor
-
-    Args:
-      interpreter_path: the path for Matlab's intepreter (actually,
-        it is usally just a bash script).  Something such as
-        "/opt/MATLAB/R2010b/bin/matlab"
-
-      matlab_opts: a list of options to be passed when starting Matlab.
-        Defaults to ["-nodisplay", "-nosplash", "-nojvm"].
-    """
+  def start_matlab(self):
+    """Start the Matlab session."""
 
     self.session = subprocess.Popen(
-      interpreter + options,
+      self.interpreter + self.interpreter_options,
       stdin  = subprocess.PIPE,
       stdout = subprocess.PIPE,
     )
@@ -477,6 +473,45 @@ exit (omero_ext_processing_status);
       self.session.stdout.read() # discard Matlab's splash screen
     finally:
       fcntl.fcntl(self.session.stdout, fcntl.F_SETFL, old_flags)
+
+  def run_matlab(self, timeout = None, timeout_grain = 10)
+    """Actually runs the code in Matlab.
+
+    Because of the way Matlab works, it is highly recommended to set
+    a Timeout.
+    """
+    ## FIXME merge this with bin_block process method
+
+    if timeout:
+      timeout = lambda : time.time() > timeout
+    else:
+      timeout = lambda : False
+
+    self.session.stdin.write(self.code)
+    self.session.stdin.flush()
+
+    def finished():
+      return self.session.poll() is not None
+    while not finished() and not timeout():
+      self.conn.keepAlive()
+      time.sleep(timeout_grain)
+
+    if finished() and p.returncode != 0:
+      raise bin_bad_exit("`%s` exited with status %i", args, p.returncode)
+    elif timeout():
+      p.terminate()
+      raise timeout_reached("processing exceedeed timeout")
+
+    ## TODO figure out StringIO to avoid extra file here
+    self.flog = self.get_tmp_file(suffix = ".code")
+    self.flog.write(self.code)
+    self.flog.flush()
+
+  def process(self):
+    self.create_code()
+    self.start_matlab()
+    self.run_matlab()
+
 
 class chain(object):
   """Processing chain
