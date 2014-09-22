@@ -276,38 +276,16 @@ class bin_block(block):
       raise timeout_reached("processing exceedeed timeout")
 
   def send_child(self):
-    """Send/export/upload processed image back into omero.
-
-    Requirements:
-      
-
-    Known vulnerabilities:
-      * during import of image file into omero, the session UUID is
-        visible on the list of processes.  This UUID can be used by
-        anyone to log in as the same user.
-    """
+    """Send/export/upload processed image back into omero."""
 
     cli = omero.cli.CLI()
     cli.loadplugins()
 
-    ## Parse the hostname from the router information (which will be a string
-    ## like 'OMERO.Glacier2/router -t -e 1.0:tcp -h 129.67.77.159 -p 4063').
-    ## While at the moment most people have OMERO and the processor on the
-    ## same system, this is not true for us or anyone else that in the future
-    ## may start using OMERO.grid.
-    hostname = "localhost"
-    router = str(self.client.getRouter(self.client.getCommunicator())).split(" ")
-    is_h = False
-    for arg in router:
-      if is_h:
-        hostname = arg
-        break
-      elif arg == "-h":
-        is_h = True
+    ## TODO replace with a property setter once it is implemented
+    ##      https://trac.openmicroscopy.org.uk/ome/ticket/12388
+    cli._client = self.client.createClient(secure = True)
 
     cmd = [
-      "-s", hostname,
-      "-k", self.client.getSessionId(),
       "import",
       "--debug", "ERROR",
     ]
@@ -582,6 +560,17 @@ class chain(object):
 
     self.client = omero.scripts.client(self.title, self.doc, *self.args)
     self.conn = omero.gateway.BlitzGateway(client_obj = self.client)
+
+    ## XXX http://lists.openmicroscopy.org.uk/pipermail/ome-users/2014-September/004775.html
+    router = self.client.getProperty("Ice.Default.Router")
+    router = self.client.getCommunicator().stringToProxy(router)
+    for endpoint in router.ice_getEndpoints():
+      host = endpoint.getInfo().host
+      self.client.ic.getProperties().setProperty("omero.host", host)
+      break
+    else:
+      ## If it fails for some reason, let's default to 'localhost'
+      self.client.ic.getProperties().setProperty("omero.host", "localhost")
 
     ## TODO when we get multiple blocks this will get tricky
     params = self.client.getInputs(unwrap = True)
