@@ -25,6 +25,7 @@ import tempfile
 import sys
 import distutils.spawn
 import time
+import threading
 
 import omero.scripts
 import omero.gateway
@@ -266,7 +267,6 @@ class bin_block(block):
     def finished():
       return p.poll() is not None
     while not finished() and not timeout():
-      self.conn.keepAlive()
       time.sleep(timeout_grain)
 
     if finished() and p.returncode != 0:
@@ -473,7 +473,7 @@ class matlab_block(pipe_block):
     finally:
       fcntl.fcntl(self.session.stdout, fcntl.F_SETFL, old_flags)
 
-  def run_matlab(self, timeout = None, timeout_grain = 10)
+  def run_matlab(self, timeout = None, timeout_grain = 10):
     """Actually runs the code in Matlab.
 
     Because of the way Matlab works, it is highly recommended to set
@@ -492,7 +492,6 @@ class matlab_block(pipe_block):
     def finished():
       return self.session.poll() is not None
     while not finished() and not timeout():
-      self.conn.keepAlive()
       time.sleep(timeout_grain)
 
     if finished() and p.returncode != 0:
@@ -605,6 +604,17 @@ class chain(object):
 
     self.client = omero.scripts.client(self.title, self.doc, *self.args)
     self.conn = omero.gateway.BlitzGateway(client_obj = self.client)
+
+    ## Connection is always lost after around ~ 10min (configurable in
+    ## the server).  Even setting enableKeepAlive above that value will
+    ## not work, we must keep sending keep alive packets.
+    def keep_connection_alive():
+      while True:
+        self.conn.keepAlive()
+        time.sleep(60)
+    th_ka = threading.Thread(target = keep_connection_alive)
+    th_ka.daemon = True
+    th_ka.start()
 
     ## XXX http://lists.openmicroscopy.org.uk/pipermail/ome-users/2014-September/004775.html
     router = self.client.getProperty("Ice.Default.Router")
