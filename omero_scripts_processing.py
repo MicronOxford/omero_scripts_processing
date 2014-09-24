@@ -26,6 +26,7 @@ import sys
 import distutils.spawn
 import time
 import threading
+import errno
 
 import omero.scripts
 import omero.gateway
@@ -104,7 +105,21 @@ class block(object):
   ## TODO investigate something nicer
   def clean_tmp_files(self):
     """Remove all temporary files created by this instance."""
-    self._tmpfiles = []
+    errors = []
+    for f in self._tmpfiles:
+      try:
+        ## Closing should remove them
+        f.close()
+        ## Just in case...
+        os.unlink(f.name)
+      ## We are doing nothingwith the errors now but in the future
+      ## we may want to send these to a sysadmin for investigation.
+      except OSError as e:
+        if e.errno != errno.ENOENT: # No such file or directory
+          errors.append(e)
+      except Exception as e:
+        errors.append(e)
+
 
   def launch(self, parent):
     """Performs the whole processing block."""
@@ -138,7 +153,7 @@ class block(object):
     ##      datasets but we haven't come across it.  At the moment this
     ##      will pick the first listed, we can think of something to do
     ##      when it actually becomes a problem.
-    self.dataset = None
+    self.datasetID = None
     for p in parent.listParents():
       self.datasetID = p.getId()
       break
@@ -406,6 +421,9 @@ class matlab_block(pipe_block):
   interpreter_options = ["-nodisplay", "-nosplash", "-nojvm"]
   """List of options to use when starting Matlab."""
 
+  def __init__(self):
+    super(matlab_block, self).__init__(bin_path = self.interpreter)
+
   @staticmethod
   def bool_py2m(b):
     """Convert Python boolean values into Matlab."""
@@ -417,12 +435,12 @@ class matlab_block(pipe_block):
     Creates an ome.tiff and sets self.fin to it.
     """
     super(matlab_block, self).get_parent(parent)
-    self.fin = self.get_tmp_file(suffix = ".ome.tiff")
-    self.fin.write(im.exportOmeTiff())
+    self.fin = self.get_tmp_file(suffix = ".tiff")
+    self.fin.write(self.parent.exportOmeTiff())
     self.fin.flush()
 
   @staticmethod
-  def protect_exit(self, code):
+  def protect_exit(code):
     """Enclose the Matlab code in an try/catch block.
 
     This modifies `code` property so that it is enclosed in a
@@ -456,7 +474,7 @@ class matlab_block(pipe_block):
     """Start the Matlab session."""
 
     self.session = subprocess.Popen(
-      self.interpreter + self.interpreter_options,
+      [self.interpreter] + self.interpreter_options,
       stdin  = subprocess.PIPE,
       stdout = subprocess.PIPE,
     )
@@ -494,10 +512,10 @@ class matlab_block(pipe_block):
     while not finished() and not timeout():
       time.sleep(timeout_grain)
 
-    if finished() and p.returncode != 0:
-      raise bin_bad_exit("`%s` exited with status %i", args, p.returncode)
+    if finished() and self.session.returncode != 0:
+      raise bin_bad_exit("Matlab exited with status %i", p.returncode)
     elif timeout():
-      p.terminate()
+      self.session.terminate()
       raise timeout_reached("processing exceedeed timeout")
 
     ## TODO figure out StringIO to avoid extra file here
